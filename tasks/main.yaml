@@ -20,6 +20,10 @@
 - name: Setup services
   ansible.builtin.import_tasks: service.yaml
 
+- name: Setup systemd cleanup configuration
+  ansible.builtin.import_tasks: systemd_cleanup_rules.yaml
+  tags: systemd-cleanup-rules
+
 - name: Manage volume
   ansible.builtin.import_tasks: volume.yaml
   when: manage_volume | bool

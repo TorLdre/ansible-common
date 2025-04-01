@@ -1,0 +1,55 @@
+---
+# check that the specified systemd cleanup rule file is there, create emty
+# one if not. Then try to replace existing rules with new parameters or
+# add new entry if the rule has not been existing
+# systemd cleanup timer is running regularly, no need for service restart, but
+# cleanup can be executed immediately by setting -e apply_cleanup=1
+
+- name: Check for existing rules
+  ansible.builtin.lineinfile:
+    path: '{{ item.value.rule }}'
+    regexp: '^(d)\s+({{ item.key }})\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)'
+    state: absent
+  check_mode: true
+  changed_when: false
+  with_dict: "{{ custom_systemd_cleanup | default({}) }}"
+  register: have_rule
+
+# need backrefs to be true in order adjust only those values which have been configured
+# in the dictionary, but then ansible.builtin.lineinfile does not add the line when nothing
+# is matched, i.e. there is no initial line. That's why, a second task is necessary, this
+# time without backrefs. This would eventually result in an unwanted additional line for
+# the same rules when the existing line does not follow the defaults values. So we need
+# another check first to find lines of this rule. Makes code a bit difficult to read.
+- name: Adjust existing cleanup rules
+  ansible.builtin.lineinfile:
+    path: '{{ item.item.value.rule }}'
+    regexp: '^(d)\s+({{ item.item.key }})\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)'
+    line: >
+      \g<1> {{ item.item.key }}
+      {{ item.item.value.permisson | default("\3") }}
+      {{ item.item.value.user | default("\4") }}
+      {{ item.item.value.group | default("\5") }}
+      {{ item.item.value.retention }}
+    backrefs: true
+  loop: "{{ have_rule.results }}"
+  when: item.found | default(false)
+
+- name: Add all rules not existing
+  ansible.builtin.lineinfile:
+    path: '{{ item.item.value.rule }}'
+    line: >
+      d {{ item.item.key }}
+      {{ item.item.value.permisson | default('0777') }}
+      {{ item.item.value.user | default('root') }}
+      {{ item.item.value.group | default('root') }}
+      {{ item.item.value.retention }}
+    state: present
+    create: true
+  loop: "{{ have_rule.results }}"
+  when: item.found is not defined or not item.found
+
+- name: Apply immediately if variable apply-cleanup is set
+  shell: |
+    systemd-tmpfiles --clean
+  when: "apply_cleanup | default(false)"
